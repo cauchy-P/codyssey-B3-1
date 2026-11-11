@@ -1,0 +1,23 @@
+검증 시각: 2026-11-02 17:53:44 KST
+대상: i-04a0204fd077106c5  /  subnet-09e46cc80fedcd1a3  /  퍼블릭 IPv4 52.64.200.125
+
+[17:53:50] 1. 네트워크 구성
+  PASS  라우트 0.0.0.0/0 대상               igw
+  PASS  서브넷 퍼블릭 IPv4 자동 할당   True
+
+[17:53:52] 2. 접근 제어 (보안 그룹 인바운드)
+  PASS  HTTP 80 ← 0.0.0.0/0 허용             yes
+  PASS  SSH 22 ← 0.0.0.0/0 노출              no
+  PASS  0.0.0.0/0 전체 포트 허용 규칙    no
+
+[17:53:54] 3. 외부 접속 검증
+  PASS  GET http://52.64.200.125/                200
+  PASS  GET http://52.64.200.125/health          200
+  PASS  /health 응답 본문                    OK
+
+[17:53:56] 4. 인스턴스 내부 상태 (SSH)
+  PASS  nginx 서비스 상태                   active
+  PASS  curl http://localhost                    200
+  PASS  curl https://example.com (아웃바운드) 200
+
+결과: 11개 통과 / 0개 실패
