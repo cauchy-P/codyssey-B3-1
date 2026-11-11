@@ -1,22 +1,26 @@
 # AWS 기초 웹 인프라 구축
 
-AWS 시드니 리전에서 VPC 기반 웹 서비스 인프라를 설계·구축하고, Security Group과 IAM 최소 권한을 적용한 EC2/Nginx 서비스를 배포·검증한 프로젝트입니다. 인프라 생성·검증·정리 과정은 AWS CLI 스크립트로 자동화했습니다.
+이 프로젝트는 AWS VPC 안에 웹 서버를 배치하고, 네트워크 경로와 접근 권한을 제한한 뒤 외부에서 동작을 확인하는 실습이다. Bash 스크립트로 리소스 생성·검증·정리를 자동화했으며, EC2에서 Nginx가 `/`와 `/health` 요청에 응답하도록 구성했다.
 
----
-
-## 아키텍처
+## 한눈에 보는 구성
 
 ![AWS 웹 인프라 아키텍처](docs/images/architecture.png)
 
-### 통신 흐름
+사용자 웹 요청은 Internet Gateway, Public Subnet, 보안 그룹의 80번 규칙을 거쳐 EC2의 Nginx에 도달한다. 관리자는 운영자 공인 IP의 `/32` 범위에서만 SSH 22번 포트로 접속한다. EC2의 아웃바운드 요청은 Route Table의 기본 경로를 따라 Internet Gateway로 나간다.
 
-- **웹 요청**: `사용자 → Internet Gateway → Public Subnet → Security Group(80) → EC2의 Nginx`
-- **서버 관리**: `운영자 → Internet Gateway → Security Group(22, 운영자 IP/32) → EC2`
-- **아웃바운드**: `EC2 → Route Table(0.0.0.0/0) → Internet Gateway → 인터넷`
+| AWS 구성 요소 | 설정 | 용도 |
+|---|---|---|
+| VPC | `10.0.0.0/16` | 프로젝트 전용 네트워크 |
+| Public Subnet | `10.0.1.0/24`, `ap-southeast-2a` | 퍼블릭 EC2 배치 및 퍼블릭 IPv4 자동 할당 |
+| Internet Gateway | VPC에 연결 | VPC와 인터넷 사이의 경로 |
+| Route Table | `0.0.0.0/0 → Internet Gateway` | Public Subnet의 기본 인터넷 경로 |
+| EC2 | Ubuntu 24.04 LTS, micro급 | Nginx 실행 |
+| EBS | gp3 8 GiB, `DeleteOnTermination=true` | EC2 루트 볼륨 |
+| Security Group | HTTP 80 전체 허용, SSH 22 운영자 IP `/32` | 인바운드 접근 제어 |
+| IAM | `codyssey-infra`, 시드니 및 `t2.micro`·`t3.micro` 제한 | AWS API 권한 축소 |
+| Nginx | `/`, `/health` | 웹 페이지와 헬스체크 응답 |
 
-### Public Subnet이 인터넷과 연결되는 조건
-
-Internet Gateway(IGW)는 특정 Subnet이 아니라 **VPC에 연결**한다. Subnet은 자신과 연결된 Route Table을 통해 IGW로 향하는 경로를 사용한다.
+인터넷에 연결되는 Subnet을 만들려면 여러 설정이 함께 맞아야 한다. IGW는 Subnet이 아니라 VPC에 연결하고, Public Subnet은 인터넷 경로가 들어 있는 Route Table과 실제로 association해야 한다. 이 프로젝트처럼 전용 Route Table을 만들고 연결하지 않으면 Subnet은 Main Route Table을 계속 사용할 수 있다. 또한 EC2에는 Public IPv4 또는 Elastic IP가 필요하며, Security Group도 필요한 통신을 허용해야 한다.
 
 ```text
 IGW ↔ VPC
@@ -25,49 +29,21 @@ Route Table: 0.0.0.0/0 → IGW
 EC2: Public IPv4 보유
 ```
 
-Route Table을 만들고 `0.0.0.0/0 → IGW` 경로를 추가하는 것만으로는 해당 Subnet에 적용되지 않는다. 이 프로젝트처럼 별도의 Public Route Table을 만들었다면 **실제 Public Subnet과 명시적으로 연결(association)**해야 한다. 연결하지 않으면 Subnet은 VPC의 Main Route Table을 사용하므로, 새로 만든 인터넷 경로가 적용되지 않을 수 있다.
+주소 표기의 계산과 `/0`, `/32`가 라우팅 및 접근 규칙에서 갖는 의미는 [IPv4와 CIDR 이해하기](docs/ipv4-cidr.md)에 정리했다.
 
-또한 Subnet에 인터넷 경로가 있더라도 EC2에 Public IPv4 또는 Elastic IP가 없으면 인터넷과 직접 통신할 수 없다. 따라서 이 프로젝트의 Public Subnet은 다음 조건을 함께 충족한다.
+## 환경과 범위
 
-- IGW가 VPC에 연결되어 있음
-- Public Subnet이 Public Route Table과 연결되어 있음
-- Public Route Table에 `0.0.0.0/0 → IGW` 경로가 있음
-- EC2에 Public IPv4가 할당되어 있음
-- Security Group이 필요한 인바운드·아웃바운드 통신을 허용함
+| 항목 | 조건 |
+|---|---|
+| 로컬 환경 | Bash를 실행할 수 있는 macOS/Linux 또는 Windows WSL |
+| 필요 도구 | AWS CLI v2, `curl`, OpenSSH 클라이언트 |
+| AWS 사용자 | 루트 계정 대신 `codyssey-infra` IAM 사용자 |
+| 배포 위치 | 시드니 `ap-southeast-2`, 단일 AZ |
+| 인스턴스 및 스토리지 | `t2.micro` 또는 `t3.micro` 1대, gp3 8 GiB |
+| 네트워크 보안 | HTTP 80은 전체 공개, SSH 22는 운영자 IP `/32` |
+| 제외 범위 | ALB, Auto Scaling, RDS, HTTPS, 고가용성 구성 |
 
-이 구성에 사용된 `10.0.0.0/16`, `10.0.1.0/24`, `0.0.0.0/0`, `/32`의 의미와 주소 계산 방법은 [IPv4와 CIDR 이해하기](docs/ipv4-cidr.md)에서 확인할 수 있습니다.
-
-## 인프라 구성
-
-| AWS 리소스 | 설정 | 역할 |
-|-------------|------|------|
-| **VPC** | `10.0.0.0/16` | 프로젝트 전용 가상 네트워크 |
-| **Public Subnet** | `10.0.1.0/24`, `ap-southeast-2a` | 퍼블릭 EC2 배치 영역, 퍼블릭 IPv4 자동 할당 |
-| **Internet Gateway** | VPC에 연결 | VPC와 인터넷 연결 |
-| **Route Table** | `0.0.0.0/0 → Internet Gateway` | Public Subnet의 인터넷 경로 |
-| **EC2** | Ubuntu 24.04 LTS, micro급 | Nginx 웹 서버 실행 |
-| **EBS** | gp3 8 GiB, `DeleteOnTermination=true` | EC2 루트 스토리지 |
-| **Security Group** | HTTP 80 전체 허용, SSH 22 운영자 IP `/32` | EC2 인바운드 접근 제어 |
-| **IAM** | `codyssey-infra`, 시드니 리전 및 `t2.micro`·`t3.micro` 제한 | AWS API 최소 권한 적용 |
-| **Nginx** | `/`, `/health` | 웹 페이지 및 헬스체크 응답 |
-
----
-
-## 실행 환경 및 제약 사항
-
-| 구분 | 내용 |
-|------|------|
-| 로컬 환경 | Bash가 실행되는 macOS/Linux 또는 Windows WSL |
-| 필수 도구 | AWS CLI v2, `curl`, OpenSSH 클라이언트 |
-| AWS 계정 | 루트 계정이 아닌 `codyssey-infra` IAM 사용자 사용 |
-| 배포 위치 | 시드니 리전 `ap-southeast-2`, 단일 AZ |
-| 인스턴스 | `t2.micro` 또는 `t3.micro` 1대, EBS gp3 8 GiB |
-| 보안 | HTTP 80만 전체 공개, SSH 22는 운영자 IP `/32`로 제한 |
-| 범위 제외 | ALB, Auto Scaling, RDS, HTTPS, 고가용성 구성 |
-
-키페어 개인키는 `~/.ssh/codyssey-key.pem`에 권한 `400`으로 보관하며 저장소에 커밋하지 않습니다.
-
-아래 명령으로 프로젝트 실행에 필요한 AWS CLI, Bash, curl, SSH가 설치되어 있는지 확인합니다.
+키페어 개인키는 `~/.ssh/codyssey-key.pem`에 저장하고 권한을 `400`으로 제한한다. 개인키는 저장소에 커밋하지 않는다. 실행 전 로컬 도구를 확인한다.
 
 ```bash
 aws --version
@@ -76,25 +52,13 @@ curl --version
 ssh -V
 ```
 
----
+## 배포 준비
 
-## 실행 방법
+이 저장소 사본은 시드니 리전에서 실행하도록 조정되어 있다. 원본 미션의 서울 리전 조건과 다르므로 제출할 때 이 변경을 밝혀야 한다. `docs`에 남아 있는 검증 및 정리 기록은 원본 실행 기록이며 시드니에서 배포했다는 증빙이 아니다.
 
-### 사전 준비
+먼저 AWS 루트 계정이 아닌 `codyssey-infra` 사용자를 준비하고, [IAM 정책 파일](infra/iam-policy.json)을 고객 관리형 또는 인라인 정책으로 연결한다. 정책 생성과 사용자 연결은 실행 스크립트가 대신하지 않는다. CLI 인증에는 사용자의 Access Key ID와 Secret Access Key가 필요하다. 자격 증명을 문서나 코드에 쓰거나 Git에 올리지 않는다.
 
-이 작업 사본은 시드니(`ap-southeast-2`)에서 실행하도록 조정했습니다. 원본 미션의 서울 리전 조건과 다르므로 제출 시 리전 변경 내용을 명시하세요. `docs`의 기존 검증·정리 기록은 원본 실행 기록이며 시드니 배포 증빙이 아닙니다.
-
-아래 준비를 마친 뒤 프로젝트 루트 디렉터리에서 스크립트를 실행합니다.
-
-1. **AWS IAM 사용자와 권한 준비**
-
-   AWS 루트 계정 대신 `codyssey-infra` IAM 사용자를 준비합니다. 이 사용자에게 [`infra/iam-policy.json`](infra/iam-policy.json)을 고객 관리형 정책 또는 인라인 정책으로 연결해야 합니다. 정책 생성과 사용자 연결은 스크립트가 자동화하지 않습니다. CLI 로그인에 사용할 **Access Key ID**와 **Secret Access Key**도 필요합니다.
-
-   > 자격 증명은 README나 소스 코드에 직접 적거나 Git 저장소에 커밋하지 않습니다.
-
-2. **AWS CLI 자격 증명 설정**
-
-   WSL/Linux 셸에서 아래 명령을 실행하고 IAM 사용자의 자격 증명을 입력합니다. 기본 리전은 이 프로젝트가 사용하는 시드니 리전 `ap-southeast-2`, 출력 형식은 `json`으로 설정합니다.
+AWS CLI에 자격 증명을 등록할 때 기본 리전은 `ap-southeast-2`, 출력 형식은 `json`으로 지정한다.
 
    ```bash
    aws configure
@@ -104,40 +68,36 @@ ssh -V
    # Default output format: json
    ```
 
-   설정이 올바른지 다음 명령으로 확인합니다. 오류 없이 IAM 사용자 정보가 출력되면 준비가 완료된 것입니다.
+계정과 리전이 의도한 값인지 호출자 정보와 함께 확인한다.
 
    ```bash
    aws sts get-caller-identity
    aws configure get region
    ```
 
-   호출자 정보와 `ap-southeast-2`가 출력되는지 확인합니다. 스크립트도 실행 시 리전을 시드니로 설정하지만, 다른 프로젝트와 혼동하지 않도록 CLI 설정을 먼저 확인하는 편이 안전합니다.
-
-3. **프로젝트 디렉터리로 이동**
-
-   아래 명령을 실행했을 때 `infra`, `scripts`, `README.md`가 보이는 위치여야 합니다.
+프로젝트 루트에서 실행해야 한다. 이 위치에는 `infra`, `scripts`, `README.md`가 있어야 한다.
 
    ```bash
    cd B6-1.aws-infra-base
    ls
    ```
 
-> `provision.sh`는 실행한 컴퓨터의 현재 공인 IP를 확인해 그 IP에만 SSH 접속을 허용합니다. 따라서 실행 중에는 인터넷 연결이 필요하며, 실행 후 공인 IP가 바뀌면 SSH 접속이 제한될 수 있습니다.
+`provision.sh`는 실행 컴퓨터의 현재 공인 IP를 조회해 해당 주소에만 SSH를 허용한다. 따라서 실행 중 인터넷 연결이 필요하다. 실행 뒤 공인 IP가 바뀌면 SSH 규칙을 새 주소로 갱신해야 한다.
 
-### 실행 설정
+### 실행 변수와 인스턴스 유형
 
-별도 설정이 없으면 아래 기본값을 사용합니다. 이 실습의 스크립트 기본값과 IAM 정책이 시드니 리전으로 설정되어 있으므로 `REGION`은 변경하지 않습니다.
+기본 설정은 아래와 같다. 스크립트와 IAM 정책은 시드니를 사용하므로 `REGION`을 변경하지 않는다.
 
-| 환경변수 | 기본값 | 용도 |
-|------|------|------|
-| `REGION` / `AZ` | `ap-southeast-2` / `ap-southeast-2a` | 리소스 생성 위치 |
-| `INSTANCE_TYPE` | `t2.micro` | EC2 유형. IAM 정책상 `t2.micro`, `t3.micro`만 허용 |
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `REGION` / `AZ` | `ap-southeast-2` / `ap-southeast-2a` | 리소스 배치 위치 |
+| `INSTANCE_TYPE` | `t2.micro` | IAM 정책에서 `t2.micro`, `t3.micro`만 허용 |
 | `VOLUME_SIZE` | `8` | 루트 EBS 크기(GiB) |
-| `SSH_CIDR` | 현재 공인 IP `/32` 자동 조회 | SSH 허용 대역을 직접 지정할 때 사용 |
+| `SSH_CIDR` | 현재 공인 IP `/32` 자동 조회 | SSH 허용 범위를 직접 지정할 때 사용 |
 | `PROJECT_TAG` | `codyssey-b6-1` | 검증·삭제 대상 식별 태그 |
-| `KEY_NAME` / `KEY_FILE` | `codyssey-key` / `~/.ssh/codyssey-key.pem` | EC2 키페어와 로컬 개인키 경로 |
+| `KEY_NAME` / `KEY_FILE` | `codyssey-key` / `~/.ssh/codyssey-key.pem` | AWS 키페어 이름과 로컬 키 경로 |
 
-AWS의 프리 티어 대상은 계정과 시점에 따라 다를 수 있습니다. 생성 전에 아래 명령으로 대상 유형을 확인하고, `t2.micro`가 대상이 아니면 `t3.micro`로 실행합니다.
+프리 티어 대상 인스턴스 유형은 계정과 시점에 따라 다를 수 있다. 배포 전에 조회하고, `t2.micro`가 대상이 아니면 `t3.micro`를 지정한다.
 
 ```bash
 aws ec2 describe-instance-types \
@@ -145,11 +105,11 @@ aws ec2 describe-instance-types \
   --query 'InstanceTypes[].InstanceType' --output text
 ```
 
-### 실행 순서
+## 배포와 검증
 
-다음 다섯 단계를 순서대로 실행합니다.
+다음 순서로 배포한다. 리소스에는 `Project=codyssey-b6-1` 태그가 붙어 검증과 정리 대상을 구별한다.
 
-1. **인프라 자동 생성**
+### 1. 인프라 생성
 
    ```bash
    bash scripts/provision.sh
@@ -157,102 +117,93 @@ aws ec2 describe-instance-types \
    # INSTANCE_TYPE=t3.micro bash scripts/provision.sh
    ```
 
-   `provision.sh`는 VPC, Public Subnet, Internet Gateway, Route Table, Security Group, Key Pair와 EC2를 차례대로 생성합니다. 각 리소스에는 `Project=codyssey-b6-1` 태그를 붙여 이후 검증과 정리 대상을 구분합니다.
+스크립트는 VPC, Public Subnet, Internet Gateway, Route Table, Security Group, Key Pair, EC2를 순서대로 만든다.
 
-2. **Nginx 설치 대기**
+### 2. EC2 초기 설정 완료 대기
 
    ```bash
    PUBLIC_IP="x.x.x.x"  # provision.sh가 출력한 Public IPv4로 교체
    ssh -i ~/.ssh/codyssey-key.pem ubuntu@"$PUBLIC_IP" 'cloud-init status --wait'
    ```
 
-   EC2 최초 부팅 시 [`user-data.sh`](infra/user-data.sh)가 Nginx를 설치하고 `/`와 `/health` 응답을 설정합니다. EC2의 `running` 상태는 초기화 완료를 의미하지 않으므로 `cloud-init`이 끝난 뒤 검증합니다. SSH가 아직 준비되지 않았다면 잠시 후 같은 명령을 다시 실행합니다.
+최초 부팅 때 [user-data 스크립트](infra/user-data.sh)가 Nginx와 `/`, `/health` 응답을 설정한다. 인스턴스의 `running` 상태만으로 초기화가 끝났다고 볼 수 없으므로 `cloud-init` 완료 후 확인한다. SSH가 아직 열리지 않았다면 잠시 기다린 뒤 같은 명령을 다시 실행한다.
 
-3. **정상 작동 확인 — 방식 (A) 브라우저 접속**
+### 3. 브라우저에서 외부 접속 확인
 
-   로컬 컴퓨터의 브라우저 주소창에 다음 URL을 입력합니다. `<퍼블릭IP>`는 `provision.sh`가 출력한 Public IPv4로 바꿉니다.
+아래 주소의 `<퍼블릭IP>`를 배포 스크립트가 출력한 주소로 바꿔 브라우저에서 연다.
 
    ```text
    http://<퍼블릭IP>
    ```
 
-   Nginx 페이지가 표시되면 외부 접속이 정상입니다. 접속 URL과 페이지를 확인할 수 있도록 화면을 캡처해 접속 증빙으로 남깁니다.
+Nginx 페이지가 나오면 외부 접속을 확인한 것이다. 접속 주소와 페이지가 함께 보이도록 화면을 캡처해 증빙으로 보관한다.
 
-4. **추가 자동 검증**
+### 4. 자동 점검
 
    ```bash
    bash scripts/verify.sh
    ```
 
-   네트워크, 보안 그룹, 외부 HTTP 응답, SSH, Nginx와 아웃바운드 통신에 관한 11개 항목을 자동으로 점검하고 결과를 `docs/verification.log`에 기록합니다. AWS 연결 없이 보안 그룹 판정 로직만 확인하려면 `bash scripts/test-sg-rules.sh`를 실행합니다. IAM 정책 연결 여부와 리소스 삭제 완료 여부는 검증 범위에 포함되지 않습니다.
+자동 검증은 네트워크, Security Group, 외부 HTTP 응답, SSH, Nginx, 아웃바운드 통신 등 11개 항목을 점검하고 결과를 [검증 로그](docs/verification.log)에 기록한다. AWS 연결 없이 Security Group 판정 로직만 확인할 때는 아래 명령을 사용한다.
 
-5. **실습 리소스 삭제**
+`bash scripts/test-sg-rules.sh`
+
+IAM 정책이 실제로 사용자에게 연결되었는지와 리소스 삭제 여부는 자동 검증 범위에 포함되지 않는다.
+
+## 보안 설계
+
+Security Group은 인스턴스의 네트워크 통신을 제어한다. HTTP는 서비스 목적상 전 세계 IPv4에 공개하고, SSH는 운영자 공인 IP 하나로 제한한다. 모든 포트를 `0.0.0.0/0`에 개방하는 규칙은 두지 않았다.
+
+| 방향 | 포트 | 허용 범위 | 이유 |
+|---|---:|---|---|
+| 인바운드 | HTTP 80 | `0.0.0.0/0` | 웹 서비스 요청 수신 |
+| 인바운드 | SSH 22 | 운영자 공인 IP `/32` | 운영자만 관리 접속 |
+| 아웃바운드 | 전체 | `0.0.0.0/0` | 패키지 설치와 업데이트 등 서버의 인터넷 통신 |
+
+`provision.sh` 실행 시 확인한 공인 IP가 `/32`로 등록된다. 주소가 바뀌면 현재 주소에 맞춰 22번 포트의 허용 CIDR을 변경해야 한다. `verify.sh`는 실제 Security Group을 점검하지만, `test-sg-rules.sh`는 판정 함수에 전달한 테스트 입력만 검사한다.
+
+IAM은 AWS API로 어떤 리소스 작업을 할 수 있는지를 제한하는 별도의 보안 계층이다. 이 프로젝트는 루트 계정 대신 `codyssey-infra`를 사용하며 정책 내용은 [IAM 정책 파일](infra/iam-policy.json)에 있다.
+
+| 제한 항목 | 설정 |
+|---|---|
+| 서비스 권한 | EC2, VPC, Security Group 등 인프라에 필요한 동작 |
+| 리전 | `aws:RequestedRegion = ap-southeast-2` |
+| 인스턴스 생성 | `ec2:RunInstances`에서 `t2.micro`, `t3.micro`만 허용 |
+| 비용 확인 | `ce:GetCostAndUsage` 읽기 전용 |
+
+AWS CLI 설치와 IAM 인증 과정에서 겪은 문제는 [트러블슈팅 보고서](docs/troubleshooting.md)에 기록했다. CIDR이 라우팅과 방화벽 규칙에서 다르게 쓰이는 이유는 [CIDR 설명](docs/ipv4-cidr.md)을 참고한다.
+
+## 실행 기록과 결과물
+
+문서에 기록된 브라우저 확인은 방식 A로 수행했다.
+
+- 기록된 URL: `http://3.34.96.150`
+- 결과: 브라우저에서 Nginx의 `Welcome to nginx!` 페이지가 표시되었다고 기록되어 있다.
+- 접속 화면 링크는 원문에 `docs/images/browser-access.png`로 적혀 있지만 저장소에서 파일을 확인할 수 없다. 따라서 이 제안본에서는 없는 이미지를 증빙으로 제시하지 않는다.
+- 네트워크·보안·웹 서버 자동 점검은 11개 항목이 통과했다고 기록되어 있으며, 상세 내용은 [검증 로그](docs/verification.log)에서 확인할 수 있다.
+
+문서에는 기록된 IP와 검증 기록이 함께 남아 있지만, 이 자료만으로 두 기록이 같은 배포에서 나온 것인지 확인할 수 없다. 리전 기록에도 서울 원본 기록과 시드니용 실행 설정의 차이가 있으므로, 구체적인 실행 근거는 각 증빙의 출처와 날짜를 함께 살펴야 한다.
+
+| 결과물 | 위치 |
+|---|---|
+| 아키텍처 다이어그램 | [architecture.png](docs/images/architecture.png) |
+| 브라우저 접속 증빙 링크(원문 참조) | `docs/images/browser-access.png` — 현재 파일 없음 |
+| 자동 검증 기록 | [verification.log](docs/verification.log) |
+| 트러블슈팅 | [troubleshooting.md](docs/troubleshooting.md) |
+| 리소스 정리 기록 | [정리 체크리스트](docs/cleanup-checklist.md) |
+| CIDR 설계 설명 | [IPv4와 CIDR](docs/ipv4-cidr.md) |
+
+## 실습 종료와 리소스 정리
+
+실습을 마치면 과금 방지를 위해 생성한 리소스를 정리한다. 저장소의 [cleanup.sh](scripts/cleanup.sh)는 EC2를 종료한 뒤 EIP, 남은 EBS, Route Table, IGW, Subnet, Security Group, VPC, AWS Key Pair 순으로 프로젝트 태그가 붙은 자원을 처리하고 잔여 항목을 조회한다.
+
+기록상 2026-09-20에 AWS CLI를 이용해 수동 삭제와 조회를 마쳤다. 이 정리 기록은 서울 리전 `ap-northeast-2`를 가리키며, 현재 스크립트와 설정 문서는 시드니를 대상으로 한다. 루트 볼륨은 `DeleteOnTermination=true`였고 Elastic IP는 만들지 않았다. AWS Key Pair와 별개인 로컬 개인키도 직접 삭제했으며 Billing Dashboard에서 최종 과금 항목을 확인했다고 기록되어 있다. 상세 결과와 재확인용 CLI 명령은 [리소스 정리 체크리스트](docs/cleanup-checklist.md)에 있다.
 
    ```bash
    bash scripts/cleanup.sh
    ```
 
-   실습 종료 후 불필요한 과금을 방지하기 위해 EC2, Subnet, VPC 등 생성한 리소스를 의존 관계의 역순으로 삭제합니다. 수동 AWS CLI 정리 결과와 최종 확인 항목은 [리소스 정리 체크리스트](docs/cleanup-checklist.md)에 기록했습니다.
-
----
-
-## 보안 및 권한
-
-### Security Group — 서버로 들어오고 나가는 통신 제한
-
-| 방향 | 포트 | 허용 대상 | 설정 이유 |
-|------|------|-------------|------|
-| 인바운드 | HTTP 80 | `0.0.0.0/0` (모든 IP) | 웹 서비스는 누구나 접속할 수 있어야 하므로 허용 |
-| 인바운드 | SSH 22 | 운영자 공인 IP `/32` | 서버 관리용 접속은 운영자만 할 수 있도록 제한 |
-| 아웃바운드 | 전체 | `0.0.0.0/0` (모든 IP) | 패키지 설치, 업데이트 등 서버에서 인터넷에 접속해야 하는 작업을 위해 허용 |
-
-`0.0.0.0/0`에서 모든 포트에 접근할 수 있도록 하는 규칙은 만들지 않았습니다. 실제 Security Group은 `verify.sh`가 검사하고, `test-sg-rules.sh`는 판정 함수의 테스트 입력만 검사합니다.
-
-SSH에 접속할 수 있는 IP는 `provision.sh`를 실행할 때 현재 운영자의 공인 IP를 확인하여 `/32` 형태로 자동 등록합니다. 실행 후 운영자의 공인 IP가 바뀌면 SSH 접속이 제한될 수 있으므로, 현재 공인 IP를 기준으로 Security Group의 22번 포트 허용 대상을 갱신해야 합니다.
-
-### IAM — AWS에서 수행할 수 있는 작업과 범위를 제한
-
-콘솔·CLI 접근은 루트 계정이 아닌 `codyssey-infra` IAM 사용자로만 수행했고, 부여한 권한은 [`infra/iam-policy.json`](infra/iam-policy.json) 에 정의했습니다.
-
-| 설정 | 내용 |
-|------|------|
-| 사용 가능한 서비스 | EC2, VPC, Security Group 등 인프라 구성에 필요한 작업만 허용 |
-| 사용 가능 리전 | `aws:RequestedRegion = ap-southeast-2` (시드니 리전)에서만 작업할 수 있도록 제한 |
-| 과금 가드레일 | `ec2:RunInstances` 를 `t2.micro` / `t3.micro` 만 생성할 수 있도록 제한 |
-| 비용 확인 | `ce:GetCostAndUsage` 비용 정보 읽기 권한만 허용 |
-
-Security Group은 EC2의 네트워크 통신을 제어하고, IAM은 AWS 리소스를 다루는 API 권한을 제어합니다. 두 설정은 서로 다른 보안 계층이므로 모두 적용해야 합니다. AWS CLI 설치와 IAM 사용자 인증을 준비하며 겪은 문제는 [트러블슈팅 보고서](docs/troubleshooting.md)에 기록했습니다.
-
----
-
-## 정상 동작 확인
-
-외부 접속 검증은 방식 **(A) 브라우저 접속**으로 진행했습니다.
-
-- 접속 URL: `http://3.34.96.150`
-- 확인 결과: 브라우저에 Nginx의 `Welcome to nginx!` 페이지가 정상적으로 표시됨
-- 접속 증빙: [브라우저 접속 화면](docs/images/browser-access.png)
-
-네트워크·보안·웹 서버의 세부 항목은 별도로 자동 검증했으며, 11개 항목이 모두 통과한 결과는 [전체 자동 검증 로그](docs/verification.log)에서 확인할 수 있습니다.
-
-## 과제 결과물
-
-| 결과물 | 구현 및 확인 위치 |
-|--------|-------------------|
-| 아키텍처 다이어그램 | [AWS 인프라 구성과 트래픽 흐름](docs/images/architecture.png) |
-| 외부 접속 검증 | 방식 A(브라우저), [접속 화면](docs/images/browser-access.png), [자동 검증 기록](docs/verification.log) |
-| 트러블슈팅 보고서 | [AWS CLI 설치 실패 사례](docs/troubleshooting.md) |
-| 리소스 정리 체크리스트 | [삭제 순서, 수동 검증과 완료 기록](docs/cleanup-checklist.md) |
-
-## 리소스 정리
-
-저장소의 [`scripts/cleanup.sh`](scripts/cleanup.sh)는 EC2 종료 후 EIP, 잔여 EBS, Route Table, IGW, Subnet, Security Group, VPC, AWS 키페어 순으로 프로젝트 태그가 붙은 리소스를 정리하고 남은 항목을 조회합니다. 이번 실습에서는 2026-09-20에 AWS CLI로 리소스 의존 관계를 고려해 직접 삭제하고 조회 결과를 확인했으며, 상세 결과는 [리소스 정리 체크리스트](docs/cleanup-checklist.md)에 기록했습니다.
-
-루트 볼륨은 `DeleteOnTermination=true`이고 Elastic IP는 생성하지 않았습니다. AWS 키페어 삭제와 별개로 남는 로컬 개인키 `~/.ssh/codyssey-key.pem`도 수동으로 삭제했으며, Billing Dashboard에서 최종 과금 항목을 확인했습니다.
-
----
-
-## 디렉토리 구조
+## 저장소 구조
 
 ```
 B6-1.aws-infra-base/
@@ -275,3 +226,5 @@ B6-1.aws-infra-base/
 │   └── test-sg-rules.sh            # 보안 그룹 판정 로직 단위 테스트
 └── README.md
 ```
+
+현재 저장소의 [접속 화면](docs/images/access.png)은 별도 파일이다. 화면에 표시된 IP는 `52.64.200.125`로 원문 기록의 `3.34.96.150`과 다르므로 같은 실행의 증빙으로 단정하지 않는다.
