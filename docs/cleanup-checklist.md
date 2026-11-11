@@ -259,7 +259,7 @@ SSH에 사용한 AWS Key Pair의 이름은 `codyssey-key`다. AWS 측 키페어�
 - [x] 로컬 Private Key 삭제
 - [x] Billing Dashboard 최종 확인
 
-프로젝트 개요와 `cleanup.sh` 자동화 설명은 [README](../README.md)에, 네트워크 범위 해석은 [IPv4와 CIDR 안내](ipv4-cidr.md)에 정리되어 있다.
+프로젝트 개요와 `cleanup.sh` 자동화 설명은 [README](../README.md)에, 네트워크 범위 해석은 [IPv4와 CIDR 안내](addressing.md)에 정리되어 있다.
 
 
 ## 추가 원문 명령 블록

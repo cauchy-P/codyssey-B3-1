@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# common.sh 의 evaluate_sg_rules 단위 테스트. AWS 호출 없이 실행된다.
-#   bash scripts/test-sg-rules.sh
+# shared.sh 의 evaluate_sg_rules 단위 테스트. AWS 호출 없이 실행된다.
+#   bash scripts/test-firewall.sh
 set -uo pipefail
 cd "$(dirname "$0")/.."
-# shellcheck source=scripts/common.sh
-source scripts/common.sh
+# shellcheck source=scripts/shared.sh
+source scripts/shared.sh
 
 failed=0
 

@@ -3,8 +3,8 @@
 # 생성 순서는 의존 관계를 따르며, cleanup.sh 는 정확히 역순으로 삭제한다.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# shellcheck source=scripts/common.sh
-source scripts/common.sh
+# shellcheck source=scripts/shared.sh
+source scripts/shared.sh
 
 VPC_CIDR="${VPC_CIDR:-10.0.0.0/16}"
 SUBNET_CIDR="${SUBNET_CIDR:-10.0.1.0/24}"
@@ -13,7 +13,7 @@ INSTANCE_TYPE="${INSTANCE_TYPE:-t2.micro}"   # 계정·리전별 대상 유형�
 VOLUME_SIZE="${VOLUME_SIZE:-8}"
 
 require_aws
-[[ -f infra/user-data.sh ]] || die "infra/user-data.sh 를 찾을 수 없습니다."
+[[ -f infra/bootstrap.sh ]] || die "infra/bootstrap.sh 를 찾을 수 없습니다."
 
 # SSH 인바운드는 실행 시점의 공인 IP 한 개(/32)만 허용한다.
 SSH_CIDR="${SSH_CIDR:-$(curl -fsS https://checkip.amazonaws.com)/32}"
@@ -97,7 +97,7 @@ instance=$(aws ec2 run-instances \
   --metadata-options "HttpTokens=required,HttpEndpoint=enabled" \
   --block-device-mappings \
     "[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":$VOLUME_SIZE,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
-  --user-data file://infra/user-data.sh \
+  --user-data file://infra/bootstrap.sh \
   --tag-specifications "$(tagspec instance "$PREFIX-web")" \
                        "$(tagspec volume "$PREFIX-web-root")" \
   --query 'Instances[0].InstanceId' --output text)
@@ -120,7 +120,7 @@ cat <<EOF
 
 다음 단계
   1. user-data(Nginx 설치)가 끝날 때까지 1~2분 대기
-  2. scripts/verify.sh          # 요구사항 검증 + docs/verification.log 기록
+  2. scripts/validate.sh          # 요구사항 검증 + docs/validation.log 기록
   3. ssh -i $KEY_FILE ubuntu@$public_ip
   4. 실습 종료 후 scripts/cleanup.sh   # 과금 방지
 EOF

@@ -29,7 +29,7 @@ Route Table: 0.0.0.0/0 → IGW
 EC2: Public IPv4 보유
 ```
 
-주소 표기의 계산과 `/0`, `/32`가 라우팅 및 접근 규칙에서 갖는 의미는 [IPv4와 CIDR 이해하기](docs/ipv4-cidr.md)에 정리했다.
+주소 표기의 계산과 `/0`, `/32`가 라우팅 및 접근 규칙에서 갖는 의미는 [IPv4와 CIDR 이해하기](docs/addressing.md)에 정리했다.
 
 ## 환경과 범위
 
@@ -56,7 +56,7 @@ ssh -V
 
 이 저장소 사본은 시드니 리전에서 실행하도록 조정되어 있다. 원본 미션의 서울 리전 조건과 다르므로 제출할 때 이 변경을 밝혀야 한다. `docs`에 남아 있는 검증 및 정리 기록은 원본 실행 기록이며 시드니에서 배포했다는 증빙이 아니다.
 
-먼저 AWS 루트 계정이 아닌 `codyssey-infra` 사용자를 준비하고, [IAM 정책 파일](infra/iam-policy.json)을 고객 관리형 또는 인라인 정책으로 연결한다. 정책 생성과 사용자 연결은 실행 스크립트가 대신하지 않는다. CLI 인증에는 사용자의 Access Key ID와 Secret Access Key가 필요하다. 자격 증명을 문서나 코드에 쓰거나 Git에 올리지 않는다.
+먼저 AWS 루트 계정이 아닌 `codyssey-infra` 사용자를 준비하고, [IAM 정책 파일](infra/permissions.json)을 고객 관리형 또는 인라인 정책으로 연결한다. 정책 생성과 사용자 연결은 실행 스크립트가 대신하지 않는다. CLI 인증에는 사용자의 Access Key ID와 Secret Access Key가 필요하다. 자격 증명을 문서나 코드에 쓰거나 Git에 올리지 않는다.
 
 AWS CLI에 자격 증명을 등록할 때 기본 리전은 `ap-southeast-2`, 출력 형식은 `json`으로 지정한다.
 
@@ -82,7 +82,7 @@ AWS CLI에 자격 증명을 등록할 때 기본 리전은 `ap-southeast-2`, 출
    ls
    ```
 
-`provision.sh`는 실행 컴퓨터의 현재 공인 IP를 조회해 해당 주소에만 SSH를 허용한다. 따라서 실행 중 인터넷 연결이 필요하다. 실행 뒤 공인 IP가 바뀌면 SSH 규칙을 새 주소로 갱신해야 한다.
+`deploy.sh`는 실행 컴퓨터의 현재 공인 IP를 조회해 해당 주소에만 SSH를 허용한다. 따라서 실행 중 인터넷 연결이 필요하다. 실행 뒤 공인 IP가 바뀌면 SSH 규칙을 새 주소로 갱신해야 한다.
 
 ### 실행 변수와 인스턴스 유형
 
@@ -112,9 +112,9 @@ aws ec2 describe-instance-types \
 ### 1. 인프라 생성
 
    ```bash
-   bash scripts/provision.sh
+   bash scripts/deploy.sh
    # t3.micro를 사용해야 하는 계정:
-   # INSTANCE_TYPE=t3.micro bash scripts/provision.sh
+   # INSTANCE_TYPE=t3.micro bash scripts/deploy.sh
    ```
 
 스크립트는 VPC, Public Subnet, Internet Gateway, Route Table, Security Group, Key Pair, EC2를 순서대로 만든다.
@@ -126,7 +126,7 @@ aws ec2 describe-instance-types \
    ssh -i ~/.ssh/codyssey-key.pem ubuntu@"$PUBLIC_IP" 'cloud-init status --wait'
    ```
 
-최초 부팅 때 [user-data 스크립트](infra/user-data.sh)가 Nginx와 `/`, `/health` 응답을 설정한다. 인스턴스의 `running` 상태만으로 초기화가 끝났다고 볼 수 없으므로 `cloud-init` 완료 후 확인한다. SSH가 아직 열리지 않았다면 잠시 기다린 뒤 같은 명령을 다시 실행한다.
+최초 부팅 때 [user-data 스크립트](infra/bootstrap.sh)가 Nginx와 `/`, `/health` 응답을 설정한다. 인스턴스의 `running` 상태만으로 초기화가 끝났다고 볼 수 없으므로 `cloud-init` 완료 후 확인한다. SSH가 아직 열리지 않았다면 잠시 기다린 뒤 같은 명령을 다시 실행한다.
 
 ### 3. 브라우저에서 외부 접속 확인
 
@@ -141,12 +141,12 @@ Nginx 페이지가 나오면 외부 접속을 확인한 것이다. 접속 주소
 ### 4. 자동 점검
 
    ```bash
-   bash scripts/verify.sh
+   bash scripts/validate.sh
    ```
 
-자동 검증은 네트워크, Security Group, 외부 HTTP 응답, SSH, Nginx, 아웃바운드 통신 등 11개 항목을 점검하고 결과를 [검증 로그](docs/verification.log)에 기록한다. AWS 연결 없이 Security Group 판정 로직만 확인할 때는 아래 명령을 사용한다.
+자동 검증은 네트워크, Security Group, 외부 HTTP 응답, SSH, Nginx, 아웃바운드 통신 등 11개 항목을 점검하고 결과를 [검증 로그](docs/validation.log)에 기록한다. AWS 연결 없이 Security Group 판정 로직만 확인할 때는 아래 명령을 사용한다.
 
-`bash scripts/test-sg-rules.sh`
+`bash scripts/test-firewall.sh`
 
 IAM 정책이 실제로 사용자에게 연결되었는지와 리소스 삭제 여부는 자동 검증 범위에 포함되지 않는다.
 
@@ -160,9 +160,9 @@ Security Group은 인스턴스의 네트워크 통신을 제어한다. HTTP는 �
 | 인바운드 | SSH 22 | 운영자 공인 IP `/32` | 운영자만 관리 접속 |
 | 아웃바운드 | 전체 | `0.0.0.0/0` | 패키지 설치와 업데이트 등 서버의 인터넷 통신 |
 
-`provision.sh` 실행 시 확인한 공인 IP가 `/32`로 등록된다. 주소가 바뀌면 현재 주소에 맞춰 22번 포트의 허용 CIDR을 변경해야 한다. `verify.sh`는 실제 Security Group을 점검하지만, `test-sg-rules.sh`는 판정 함수에 전달한 테스트 입력만 검사한다.
+`deploy.sh` 실행 시 확인한 공인 IP가 `/32`로 등록된다. 주소가 바뀌면 현재 주소에 맞춰 22번 포트의 허용 CIDR을 변경해야 한다. `validate.sh`는 실제 Security Group을 점검하지만, `test-firewall.sh`는 판정 함수에 전달한 테스트 입력만 검사한다.
 
-IAM은 AWS API로 어떤 리소스 작업을 할 수 있는지를 제한하는 별도의 보안 계층이다. 이 프로젝트는 루트 계정 대신 `codyssey-infra`를 사용하며 정책 내용은 [IAM 정책 파일](infra/iam-policy.json)에 있다.
+IAM은 AWS API로 어떤 리소스 작업을 할 수 있는지를 제한하는 별도의 보안 계층이다. 이 프로젝트는 루트 계정 대신 `codyssey-infra`를 사용하며 정책 내용은 [IAM 정책 파일](infra/permissions.json)에 있다.
 
 | 제한 항목 | 설정 |
 |---|---|
@@ -171,7 +171,7 @@ IAM은 AWS API로 어떤 리소스 작업을 할 수 있는지를 제한하는 �
 | 인스턴스 생성 | `ec2:RunInstances`에서 `t2.micro`, `t3.micro`만 허용 |
 | 비용 확인 | `ce:GetCostAndUsage` 읽기 전용 |
 
-AWS CLI 설치와 IAM 인증 과정에서 겪은 문제는 [트러블슈팅 보고서](docs/troubleshooting.md)에 기록했다. CIDR이 라우팅과 방화벽 규칙에서 다르게 쓰이는 이유는 [CIDR 설명](docs/ipv4-cidr.md)을 참고한다.
+AWS CLI 설치와 IAM 인증 과정에서 겪은 문제는 [트러블슈팅 보고서](docs/issues.md)에 기록했다. CIDR이 라우팅과 방화벽 규칙에서 다르게 쓰이는 이유는 [CIDR 설명](docs/addressing.md)을 참고한다.
 
 ## 실행 기록과 결과물
 
@@ -180,7 +180,7 @@ AWS CLI 설치와 IAM 인증 과정에서 겪은 문제는 [트러블슈팅 보�
 - 기록된 URL: `http://3.34.96.150`
 - 결과: 브라우저에서 Nginx의 `Welcome to nginx!` 페이지가 표시되었다고 기록되어 있다.
 - 접속 화면 링크는 원문에 `docs/images/browser-access.png`로 적혀 있지만 저장소에서 파일을 확인할 수 없다. 따라서 이 제안본에서는 없는 이미지를 증빙으로 제시하지 않는다.
-- 네트워크·보안·웹 서버 자동 점검은 11개 항목이 통과했다고 기록되어 있으며, 상세 내용은 [검증 로그](docs/verification.log)에서 확인할 수 있다.
+- 네트워크·보안·웹 서버 자동 점검은 11개 항목이 통과했다고 기록되어 있으며, 상세 내용은 [검증 로그](docs/validation.log)에서 확인할 수 있다.
 
 문서에는 기록된 IP와 검증 기록이 함께 남아 있지만, 이 자료만으로 두 기록이 같은 배포에서 나온 것인지 확인할 수 없다. 리전 기록에도 서울 원본 기록과 시드니용 실행 설정의 차이가 있으므로, 구체적인 실행 근거는 각 증빙의 출처와 날짜를 함께 살펴야 한다.
 
@@ -188,10 +188,10 @@ AWS CLI 설치와 IAM 인증 과정에서 겪은 문제는 [트러블슈팅 보�
 |---|---|
 | 아키텍처 다이어그램 | [architecture.png](docs/images/architecture.png) |
 | 브라우저 접속 증빙 링크(원문 참조) | `docs/images/browser-access.png` — 현재 파일 없음 |
-| 자동 검증 기록 | [verification.log](docs/verification.log) |
-| 트러블슈팅 | [troubleshooting.md](docs/troubleshooting.md) |
+| 자동 검증 기록 | [validation.log](docs/validation.log) |
+| 트러블슈팅 | [issues.md](docs/issues.md) |
 | 리소스 정리 기록 | [정리 체크리스트](docs/cleanup-checklist.md) |
-| CIDR 설계 설명 | [IPv4와 CIDR](docs/ipv4-cidr.md) |
+| CIDR 설계 설명 | [IPv4와 CIDR](docs/addressing.md) |
 
 ## 실습 종료와 리소스 정리
 
@@ -208,23 +208,23 @@ AWS CLI 설치와 IAM 인증 과정에서 겪은 문제는 [트러블슈팅 보�
 ```
 B6-1.aws-infra-base/
 ├── docs/                           # 제출 문서 및 증빙
-│   ├── ipv4-cidr.md                # IPv4와 CIDR 개념 및 AWS 적용
-│   ├── troubleshooting.md          # 트러블슈팅 보고서
+│   ├── addressing.md                # IPv4와 CIDR 개념 및 AWS 적용
+│   ├── issues.md          # 트러블슈팅 보고서
 │   ├── cleanup-checklist.md        # 리소스 정리 체크리스트
-│   ├── verification.log            # verify.sh 실행 기록
+│   ├── validation.log            # validate.sh 실행 기록
 │   └── images/
 │       ├── architecture.png         # 아키텍처 다이어그램
-│       └── browser-access.png       # 브라우저 외부 접속 결과
+│       └── web-check.png       # 브라우저 외부 접속 결과
 ├── infra/                          # 인프라 정의
-│   ├── iam-policy.json             # IAM 사용자에 부여한 최소 권한 정책
-│   └── user-data.sh                # EC2 부팅 시 Nginx 설치·설정
+│   ├── permissions.json             # IAM 사용자에 부여한 최소 권한 정책
+│   └── bootstrap.sh                # EC2 부팅 시 Nginx 설치·설정
 ├── scripts/                        # 실행 스크립트
-│   ├── common.sh                   # 공통 설정 · 보안 그룹 규칙 판정
-│   ├── provision.sh                # 인프라 생성
-│   ├── verify.sh                   # 요구사항 검증
+│   ├── shared.sh                   # 공통 설정 · 보안 그룹 규칙 판정
+│   ├── deploy.sh                # 인프라 생성
+│   ├── validate.sh                   # 요구사항 검증
 │   ├── cleanup.sh                  # 리소스 삭제 (생성 역순)
-│   └── test-sg-rules.sh            # 보안 그룹 판정 로직 단위 테스트
+│   └── test-firewall.sh            # 보안 그룹 판정 로직 단위 테스트
 └── README.md
 ```
 
-현재 저장소의 [접속 화면](docs/images/access.png)은 별도 파일이다. 화면에 표시된 IP는 `52.64.200.125`로 원문 기록의 `3.34.96.150`과 다르므로 같은 실행의 증빙으로 단정하지 않는다.
+현재 저장소의 [접속 화면](docs/images/web-check.png)은 별도 파일이다. 화면에 표시된 IP는 `52.64.200.125`로 원문 기록의 `3.34.96.150`과 다르므로 같은 실행의 증빙으로 단정하지 않는다.

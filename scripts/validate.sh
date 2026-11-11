@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 과제 기능 요구사항을 그대로 검증한다. 결과는 docs/verification.log 에 남는다.
+# 과제 기능 요구사항을 그대로 검증한다. 결과는 docs/validation.log 에 남는다.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-# shellcheck source=scripts/common.sh
-source scripts/common.sh
+# shellcheck source=scripts/shared.sh
+source scripts/shared.sh
 
-LOG_FILE="${LOG_FILE:-docs/verification.log}"
+LOG_FILE="${LOG_FILE:-docs/validation.log}"
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes)
 
 pass=0
@@ -84,7 +84,7 @@ main() {
   check 'curl https://example.com (아웃바운드)' '200' "${r[2]:-unreachable}"
 
   printf '\n결과: %d개 통과 / %d개 실패\n' "$pass" "$fail"
-  [[ $fail -eq 0 ]] || log '실패 항목은 docs/troubleshooting.md 의 진단 절차를 따른다.'
+  [[ $fail -eq 0 ]] || log '실패 항목은 docs/issues.md 의 진단 절차를 따른다.'
   return $((fail > 0))
 }
 

@@ -7,14 +7,14 @@
 시드니 리전(`ap-southeast-2`)에 인프라를 생성한 뒤 다음 명령으로 검증했다.
 
 ```bash
-bash scripts/verify.sh
+bash scripts/validate.sh
 ```
 
 네트워크 구성, 보안 그룹, 외부 HTTP 접속 검증은 통과했지만 인스턴스 내부 상태를 확인하는 단계에서 다음 오류가 발생했다.
 
 ```text
 [17:51:11] 4. 인스턴스 내부 상태 (SSH)
-scripts/verify.sh: line 76: mapfile: command not found
+scripts/validate.sh: line 76: mapfile: command not found
   FAIL  nginx 서비스 상태                   unreachable   (기대: active)
   FAIL  curl http://localhost                    unreachable   (기대: 200)
   FAIL  curl https://example.com (아웃바운드) unreachable   (기대: 200)
@@ -32,7 +32,7 @@ macOS 기본 Bash는 3.2 버전이며, 기존 스크립트에서 사용한 `mapf
 
 ### 해결 방법
 
-`scripts/verify.sh`에서 `mapfile`을 Bash 3.2에서도 동작하는 `while`과 `read` 반복문으로 교체했다.
+`scripts/validate.sh`에서 `mapfile`을 Bash 3.2에서도 동작하는 `while`과 `read` 반복문으로 교체했다.
 
 수정 전:
 
@@ -55,7 +55,7 @@ done <<< "$remote"
 
 ### 수정 확인
 
-- `/bin/bash -n scripts/verify.sh`로 셸 문법 검사를 통과했다.
+- `/bin/bash -n scripts/validate.sh`로 셸 문법 검사를 통과했다.
 - Bash `3.2.57(1)-release`에서 수정한 응답 파싱 구문을 검사했다.
 - 정상 응답(`active`, `200`, `200`), 빈 응답, 실패 응답(`inactive`, `500`, `000`)을 각각 예상대로 처리하는 것을 확인했다.
 
@@ -66,7 +66,7 @@ done <<< "$remote"
 프로젝트 디렉터리에서 다음 명령을 다시 실행한다.
 
 ```bash
-bash scripts/verify.sh
+bash scripts/validate.sh
 ```
 
-실행 결과는 `docs/verification.log`에 기록된다. 마지막 세 항목이 계속 실패하면 해당 결과를 기준으로 SSH 접속, Nginx 서비스 및 아웃바운드 통신을 추가로 점검한다.
+실행 결과는 `docs/validation.log`에 기록된다. 마지막 세 항목이 계속 실패하면 해당 결과를 기준으로 SSH 접속, Nginx 서비스 및 아웃바운드 통신을 추가로 점검한다.

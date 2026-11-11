@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# provision.sh 가 만든 리소스를 의존 관계 역순으로 삭제한다.
+# deploy.sh 가 만든 리소스를 의존 관계 역순으로 삭제한다.
 # 옵션: --keep-key  (키페어 유지)
 set -uo pipefail
 cd "$(dirname "$0")/.."
-# shellcheck source=scripts/common.sh
-source scripts/common.sh
+# shellcheck source=scripts/shared.sh
+source scripts/shared.sh
 
 keep_key=no
 [[ ${1:-} == --keep-key ]] && keep_key=yes
